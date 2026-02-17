@@ -1,0 +1,21 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Njm.Core.Data.SqlServer</id>
+    <version>1.0.0</version>
+    <authors>Njm.Core.Data.SqlServer</authors>
+    <description>Package Description</description>
+    <repository type="git" commit="69aa6af572162b34f140a82ba8557457b403c044" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="Njm.Core.Common" version="1.0.0" exclude="Build,Analyzers" />
+        <dependency id="Njm.Core.Data" version="1.0.0" exclude="Build,Analyzers" />
+        <dependency id="Dapper" version="2.1.66" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Data.SqlClient" version="6.1.4" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="C:\Users\JadiRajKumar\OneDrive - ValueMomentum, Inc\Desktop\NJM\njm-core-libraries\src\Njm.Core.Data.SqlServer\bin\Release\net8.0\Njm.Core.Data.SqlServer.dll" target="lib\net8.0\Njm.Core.Data.SqlServer.dll" />
+  </files>
+</package>

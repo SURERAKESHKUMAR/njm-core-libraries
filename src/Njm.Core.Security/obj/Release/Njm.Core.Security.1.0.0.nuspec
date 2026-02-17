@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Njm.Core.Security</id>
+    <version>1.0.0</version>
+    <authors>Njm.Core.Security</authors>
+    <description>Package Description</description>
+    <repository type="git" commit="69aa6af572162b34f140a82ba8557457b403c044" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="System.IdentityModel.Tokens.Jwt" version="8.16.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="C:\Users\JadiRajKumar\OneDrive - ValueMomentum, Inc\Desktop\NJM\njm-core-libraries\src\Njm.Core.Security\bin\Release\net8.0\Njm.Core.Security.dll" target="lib\net8.0\Njm.Core.Security.dll" />
+  </files>
+</package>

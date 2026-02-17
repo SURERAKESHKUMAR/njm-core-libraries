@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Njm.Core.Data.SqlServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+69aa6af572162b34f140a82ba8557457b403c044")]
 [assembly: System.Reflection.AssemblyProductAttribute("Njm.Core.Data.SqlServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Njm.Core.Data.SqlServer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
