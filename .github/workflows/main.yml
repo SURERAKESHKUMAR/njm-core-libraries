@@ -1,0 +1,33 @@
+name: Publish NuGet Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Pack
+        run: dotnet pack --configuration Release --no-build
+
+      - name: Publish
+        run: dotnet nuget push **/*.nupkg \
+             --source "https://nuget.pkg.github.com/${{ github.rajkumarvaluemomentum }}/index.json" \
+             --api-key ${{ secrets.GITHUB_TOKEN }} \
+             --skip-duplicate
