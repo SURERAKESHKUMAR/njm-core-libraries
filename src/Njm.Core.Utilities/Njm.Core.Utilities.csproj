@@ -4,6 +4,15 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+     <!-- NuGet Metadata -->
+    <PackageId>Njm.Core.Utilities</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Rajkumar</Authors>
+    <Company>NJM</Company>
+    <Description>Common utility helpers for NJM platform</Description>
+    <RepositoryUrl>https://github.com/rajkumarvaluemomentum/njm-core-libraries</RepositoryUrl>
+    <PackageTags>njm;core;utilities;helpers</PackageTags>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
 </Project>

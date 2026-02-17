@@ -5,7 +5,7 @@
     <version>1.0.0</version>
     <authors>Njm.Core.Common</authors>
     <description>Package Description</description>
-    <repository type="git" commit="69aa6af572162b34f140a82ba8557457b403c044" />
+    <repository type="git" commit="2d5d64c69018321761b03f0536b8a619ade65372" />
     <dependencies>
       <group targetFramework="net8.0" />
     </dependencies>
