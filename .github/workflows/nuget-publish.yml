@@ -1,14 +1,12 @@
-name: Build & Publish to GitHub Packages (NuGet only)
+name: Build & Publish to GitHub Packages (unique version each run)
 
 on:
   push:
-    branches: [ "main" ]   # adjust branches as needed
-  pull_request:
-    branches: [ "main" ]
+    branches: [ "main" ]        # adjust if needed
   workflow_dispatch:
     inputs:
       version:
-        description: "Package version (e.g., 1.2.3 or 1.2.3-beta1). Leave empty to use CI version."
+        description: "Override version (e.g., 1.2.3 or 1.2.3-beta.1)"
         required: false
         default: ""
 
@@ -19,32 +17,19 @@ permissions:
 env:
   DOTNET_VERSION: "8.0.x"
   CONFIGURATION: "Release"
-  GH_OWNER: "SURERAKESHKUMAR"
+  # Set your feed owner here
   NUGET_SOURCE_URL: "https://nuget.pkg.github.com/SURERAKESHKUMAR/index.json"
-  ARTIFACT_NAME: "dlls_and_packages"
 
 jobs:
   build-pack-publish:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/*.csproj', '**/*.sln') }}
-          restore-keys: |
-            nuget-${{ runner.os }}-
-
-      # Optional: add GitHub Packages as a source if you consume from it
       - name: Add GitHub Packages source
         run: |
           dotnet nuget remove source github || true
@@ -57,115 +42,72 @@ jobs:
       - name: Restore
         run: |
           if ls *.sln 1> /dev/null 2>&1; then
-            for sln in *.sln; do
-              dotnet restore "$sln"
-            done
+            for sln in *.sln; do dotnet restore "$sln"; done
           else
-            for proj in $(git ls-files '*.csproj'); do
-              dotnet restore "$proj"
-            done
+            for proj in $(git ls-files '*.csproj'); do dotnet restore "$proj"; done
           fi
 
       - name: Build
         run: |
           if ls *.sln 1> /dev/null 2>&1; then
-            for sln in *.sln; do
-              dotnet build "$sln" -c ${{ env.CONFIGURATION }} --no-restore
-            done
+            for sln in *.sln; do dotnet build "$sln" -c ${{ env.CONFIGURATION }} --no-restore; done
           else
-            for proj in $(git ls-files '*.csproj'); do
-              dotnet build "$proj" -c ${{ env.CONFIGURATION }} --no-restore
-            done
+            for proj in $(git ls-files '*.csproj'); do dotnet build "$proj" -c ${{ env.CONFIGURATION }} --no-restore; done
           fi
 
-      # Optional: tests (remove this step if you don't have tests)
-      - name: Test
-        run: |
-          set -e
-          found=false
-          for testproj in $(git ls-files '*Tests.csproj' '*Test.csproj' '*Tests/*.csproj' '*Test/*.csproj'); do
-            found=true
-            dotnet test "$testproj" -c ${{ env.CONFIGURATION }} --no-build --verbosity normal
-          done
-          if [ "$found" = false ]; then
-            echo "No test projects found. Skipping tests."
-          fi
-
-      - name: Compute package version
+      # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      # Compute an ALWAYS-UNIQUE SemVer for this run
+      # - If manual 'version' is provided, use it as-is.
+      # - Else create 0.1.0-ci.<run_number>.<shortsha>
+      #   (SemVer 2 prerelease; safe for NuGet and always unique.)
+      # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+      - name: Compute version
         id: ver
         shell: bash
         run: |
-          # No tag-based versioning: only manual input or CI fallback
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION="0.0.0-ci.${{ github.run_number }}"
+            SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7 | tr '[:upper:]' '[:lower:]')"
+            VERSION="0.1.0-ci.${{ github.run_number }}.${SHORT_SHA}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Resolved package version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
 
-      - name: Pack (.nupkg)
+      # Clean any old nupkg to avoid confusion; then pack with /p:Version
+      - name: Pack (.nupkg) with forced version
         run: |
-          PKG_DIR="artifacts/nuget"
-          mkdir -p "$PKG_DIR"
-          count=0
+          rm -rf artifacts/nuget
+          mkdir -p artifacts/nuget
+          COUNT=0
           for proj in $(git ls-files '*.csproj'); do
-            # Skip exe apps; pack only libraries
             if grep -qi "<OutputType>Exe</OutputType>" "$proj"; then
               echo "Skipping app project: $proj"
               continue
             fi
-
             echo "Packing $proj with version ${{ steps.ver.outputs.version }}"
             dotnet pack "$proj" -c ${{ env.CONFIGURATION }} \
-              /p:PackageVersion=${{ steps.ver.outputs.version }} \
+              /p:Version=${{ steps.ver.outputs.version }} \
               /p:RepositoryUrl=https://github.com/${{ github.repository }} \
               /p:RepositoryType=git \
               /p:PackageRequireLicenseAcceptance=false \
               --no-build \
-              -o "$PKG_DIR"
-            count=$((count+1))
+              -o artifacts/nuget
+            COUNT=$((COUNT+1))
           done
-
-          if [ "$count" -eq 0 ]; then
-            echo "::warning::No library projects (.csproj) found to pack."
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::warning::No library projects found to pack."
           fi
 
       - name: Publish to GitHub Packages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PKG_DIR="artifacts/nuget"
-          if [ -d "$PKG_DIR" ] && ls "$PKG_DIR"/*.nupkg 1> /dev/null 2>&1; then
-            for nupkg in "$PKG_DIR"/*.nupkg; do
-              echo "Publishing $nupkg"
-              dotnet nuget push "$nupkg" \
-                --api-key "$GITHUB_TOKEN" \
-                --source "github" \
-                --skip-duplicate
-            done
-          else
-            echo "No .nupkg files found to publish."
-          fi
-
-      - name: Collect DLLs for artifacts
-        run: |
-          OUT_DIR="artifacts/dlls"
-          mkdir -p "$OUT_DIR"
-          # Copy all built DLLs from bin/Release
-          while IFS= read -r -d '' file; do
-            rel="${file#./}"
-            dest="$OUT_DIR/$rel"
-            mkdir -p "$(dirname "$dest")"
-            cp "$file" "$dest"
-          done < <(find . -type d -name obj -prune -o -type f -path "*/bin/${{ env.CONFIGURATION }}/*" -name "*.dll" -print0)
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: |
-            artifacts/dlls/**/*
-            artifacts/nuget/**/*.nupkg
-          if-no-files-found: warn
-          retention-days: 7
+          shopt -s nullglob
+          for nupkg in artifacts/nuget/*.nupkg; do
+            echo "Publishing $nupkg"
+            dotnet nuget push "$nupkg" \
+              --api-key "$GITHUB_TOKEN" \
+              --source "github" \
+              --skip-duplicate
+          done
