@@ -1,12 +1,12 @@
-name: Build & Publish (per-project bump)
+name: Build & Publish NuGet Packages (with Release Notes)
 
 on:
   push:
-    branches: [ "main" ]     # adjust if your default branch differs
-  workflow_dispatch: {}       # manual trigger
+    branches: [ "main" ]
+  workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -14,7 +14,6 @@ env:
   CONFIGURATION: "Release"
   OWNER: "SURERAKESHKUMAR"
   NUGET_SOURCE_URL: "https://nuget.pkg.github.com/SURERAKESHKUMAR/index.json"
-  # Base version line for all packages (1.0.X)
   BASE_MAJOR: "1"
   BASE_MINOR: "0"
 
@@ -23,17 +22,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ---------------- Checkout ----------------
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # ---------------- Setup ----------------
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Add GitHub Packages source (for restore/push)
+      # ---------------- Auth ----------------
+      - name: Configure GitHub Packages
         run: |
           dotnet nuget remove source github || true
           dotnet nuget add source "${{ env.NUGET_SOURCE_URL }}" \
@@ -42,6 +44,21 @@ jobs:
             --password "${{ secrets.GITHUB_TOKEN }}" \
             --store-password-in-clear-text
 
+      # ---------------- Release Notes ----------------
+      - name: Validate release.md
+        run: |
+          if [ ! -f release.md ]; then
+            echo "❌ release.md not found!"
+            exit 1
+          fi
+
+      - name: Print release notes
+        run: |
+          echo "========== RELEASE NOTES =========="
+          cat release.md
+          echo "=================================="
+
+      # ---------------- Restore ----------------
       - name: Restore
         run: |
           if ls *.sln 1> /dev/null 2>&1; then
@@ -50,7 +67,8 @@ jobs:
             for proj in $(git ls-files '*.csproj'); do dotnet restore "$proj"; done
           fi
 
-      - name: Build (compile everything once)
+      # ---------------- Build ----------------
+      - name: Build
         run: |
           if ls *.sln 1> /dev/null 2>&1; then
             for sln in *.sln; do dotnet build "$sln" -c ${{ env.CONFIGURATION }} --no-restore; done
@@ -58,137 +76,109 @@ jobs:
             for proj in $(git ls-files '*.csproj'); do dotnet build "$proj" -c ${{ env.CONFIGURATION }} --no-restore; done
           fi
 
-      # ---------- Detect which projects changed ----------
+      # ---------------- Detect Changed Projects ----------------
       - name: Find changed projects
         id: changed
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          # Determine base commit for comparison
-          if [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            BASE="${{ github.event.before }}"
-          else
-            # Fallback: previous commit on branch
-            BASE=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          BASE="${{ github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE=$(git rev-parse HEAD~1 || echo "")
           fi
 
           if [ -z "$BASE" ]; then
-            echo "No base commit found; treating all projects as changed."
             git ls-files '*.csproj' > changed_projects.txt
           else
-            echo "Diff base: $BASE"
             git diff --name-only "$BASE" "${GITHUB_SHA}" > changed_files.txt || true
-            # Map changed files to their owning .csproj (by directory)
             : > changed_projects.txt
             while IFS= read -r proj; do
               dir="$(dirname "$proj")/"
-              # Ignore obj/ and bin/ noise
               if grep -E "^${dir//\//\\/}" changed_files.txt | grep -vE "/(obj|bin)/" >/dev/null 2>&1; then
                 echo "$proj" >> changed_projects.txt
               fi
             done < <(git ls-files '*.csproj')
           fi
 
-          # Filter to unique and library projects (skip Exe)
           sort -u changed_projects.txt > tmp.txt && mv tmp.txt changed_projects.txt
+
           : > changed_library_projects.txt
           while IFS= read -r proj; do
             if grep -qi "<OutputType>Exe</OutputType>" "$proj"; then
-              echo "Skipping app project: $proj"
               continue
             fi
             echo "$proj" >> changed_library_projects.txt
           done < changed_projects.txt
 
-          echo "Changed library projects:"
-          cat changed_library_projects.txt || true
-
           COUNT=$(wc -l < changed_library_projects.txt || echo 0)
-          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
 
-      # ---------- Pack & publish only changed library projects ----------
-      - name: Pack & publish changed packages (1.0.X per package)
+      # ---------------- Install GitHub CLI ----------------
+      - name: Install GitHub CLI
+        run: sudo apt-get install gh -y
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      # ---------------- Pack & Publish ----------------
+      - name: Pack & Publish Packages
         if: steps.changed.outputs.count != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           mkdir -p artifacts/nuget
 
-          # Helper to extract XML value
           get_xml_value() {
-            local file="$1" tag="$2"
-            # Try PackageId, then AssemblyName
-            grep -oP "(?<=<${tag}>).*?(?=</${tag}>)" "$file" | head -1 || true
+            grep -oP "(?<=<$2>).*?(?=</$2>)" "$1" | head -1 || true
           }
 
           while IFS= read -r proj; do
-            echo "---------------------------------------------------------"
-            echo "Processing project: $proj"
+            echo "Processing $proj"
 
-            # Resolve PackageId
-            pkgId="$(get_xml_value "$proj" "PackageId")"
-            if [ -z "$pkgId" ]; then
-              pkgId="$(get_xml_value "$proj" "AssemblyName")"
-            fi
-            if [ -z "$pkgId" ]; then
-              pkgId="$(basename "$proj" .csproj)"
-            fi
-            echo "PackageId: $pkgId"
+            pkgId=$(get_xml_value "$proj" "PackageId")
+            [ -z "$pkgId" ] && pkgId=$(basename "$proj" .csproj)
 
-            # Query latest published versions for this package from GitHub Packages
-            api="https://api.github.com/users/${OWNER}/packages/nuget/${pkgId}/versions?per_page=100"
-            echo "Querying: $api"
-            resp="$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
-                           -H "Accept: application/vnd.github+json" \
-                           -H "X-GitHub-Api-Version: 2022-11-28" \
-                           "$api" || true)"
+            # Get latest version
+            resp=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/users/${OWNER}/packages/nuget/${pkgId}/versions")
 
-            # Extract highest patch from 1.0.X line (BASE_MAJOR.BASE_MINOR.X)
-            latest_patch="$(
-              echo "$resp" | jq -r '.[].name' 2>/dev/null \
-                | grep -E "^${BASE_MAJOR}\.${BASE_MINOR}\.[0-9]+$" \
-                | sed -E "s/^${BASE_MAJOR}\.${BASE_MINOR}\.//" \
-                | sort -n \
-                | tail -1
-            )"
+            latest=$(echo "$resp" | jq -r '.[].name' 2>/dev/null \
+              | grep -E "^${BASE_MAJOR}\.${BASE_MINOR}\.[0-9]+$" \
+              | sed -E "s/^${BASE_MAJOR}\.${BASE_MINOR}\.//" \
+              | sort -n | tail -1)
 
-            if [ -z "${latest_patch:-}" ] || ! [[ "$latest_patch" =~ ^[0-9]+$ ]]; then
-              next_patch=0  # first publish → 1.0.0
-            else
-              next_patch=$((latest_patch + 1))
-            fi
-            version="${BASE_MAJOR}.${BASE_MINOR}.${next_patch}"
-            echo "Next version for $pkgId → $version"
+            [ -z "$latest" ] && latest=-1
+            next=$((latest + 1))
+            version="${BASE_MAJOR}.${BASE_MINOR}.${next}"
 
-            # Pack only this project with the computed version
-            dotnet pack "$proj" -c ${{ env.CONFIGURATION }} \
+            echo "Version: $version"
+
+            dotnet pack "$proj" -c $CONFIGURATION \
               /p:Version="$version" \
-              /p:RepositoryUrl="https://github.com/${{ github.repository }}" \
-              /p:RepositoryType="git" \
-              /p:PackageRequireLicenseAcceptance=false \
               --no-build \
               -o artifacts/nuget
 
-            # Push only this package's nupkg
-            # Expected filename: <PackageId>.<Version>.nupkg
-            nupkg_path="$(ls artifacts/nuget/"${pkgId}.${version}".nupkg 2>/dev/null || true)"
-            if [ -z "$nupkg_path" ]; then
-              echo "::error::Could not find artifacts/nuget/${pkgId}.${version}.nupkg"
-              exit 1
-            fi
+            pkg="artifacts/nuget/${pkgId}.${version}.nupkg"
 
-            echo "Publishing $nupkg_path"
-            dotnet nuget push "$nupkg_path" \
-              --api-key "$GITHUB_TOKEN" \
+            dotnet nuget push "$pkg" \
               --source "github" \
+              --api-key "$GITHUB_TOKEN" \
               --skip-duplicate
+
+            # -------- Create Release --------
+            tag="${pkgId}-v${version}"
+
+            echo "Creating release $tag"
+
+            gh release create "$tag" \
+              --title "$pkgId v$version" \
+              --notes-file release.md \
+              || echo "Release exists"
 
           done < changed_library_projects.txt
 
-      - name: No changed library projects
+      - name: No changes
         if: steps.changed.outputs.count == '0'
-        run: echo "No library projects changed; nothing to publish."
+        run: echo "No library changes detected"
